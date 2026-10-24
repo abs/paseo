@@ -225,6 +225,9 @@ test("switching chat tabs focuses the selected composer and preserves each draft
     await page.getByRole("button", { name: first.title, exact: true }).click();
     await expectComposerFocused(page);
     await composerLocator(page).fill("First draft");
+    await page.keyboard.press("ControlOrMeta+f");
+    const find = page.getByRole("textbox", { name: "Find in pane", exact: true });
+    await find.fill("Search before switching chats");
     await switchComposerTabWithKeyboard(page, "next");
     await expectComposerFocused(page);
     await expectComposerDraft(page, "Second draft");
@@ -286,6 +289,64 @@ test("returning to the browser preserves chat Find input focus", async ({ page }
       await expect(input).toHaveValue("Keep this search");
       await expectComposerNotFocused(page);
     }
+  } finally {
+    await agent.cleanup();
+  }
+});
+
+test("browser activation preserves an input focused before its deferred autofocus", async ({
+  page,
+}) => {
+  const agent = await seedMockAgentWorkspace({
+    repoPrefix: "composer-focus-deferred-",
+    title: "Deferred browser focus",
+  });
+  try {
+    await openAgentRoute(page, agent);
+    await expectComposerFocused(page);
+    await page.keyboard.press("ControlOrMeta+f");
+    const find = page.getByRole("textbox", { name: "Find in pane", exact: true });
+    await find.fill("Keep this search");
+    await composerLocator(page).click();
+    await blurComposerInput(page);
+    await setBrowserActive(page, { active: false, signal: "focus" });
+    await page.clock.install();
+    await page.clock.pauseAt(new Date());
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hasFocus", { configurable: true, value: () => true });
+      window.dispatchEvent(new Event("focus"));
+    });
+    await find.focus();
+    await page.clock.runFor(100);
+    await expect(find).toBeFocused();
+    await expect(find).toHaveValue("Keep this search");
+    await expectComposerNotFocused(page);
+  } finally {
+    await page.clock.resume();
+    await agent.cleanup();
+  }
+});
+
+test("returning to the browser preserves selected chat text", async ({ page }) => {
+  const sentence = "Keep this selected assistant sentence.";
+  const agent = await seedMockAgentWorkspace({
+    repoPrefix: "composer-focus-selection-return-",
+    title: "Browser return with selected text",
+    initialPrompt: "Render a sentence.",
+    featureValues: { mockAssistantResponse: sentence },
+  });
+  try {
+    await agent.client.waitForFinish(agent.agentId, 15_000);
+    await openAgentRoute(page, agent);
+    const feed = page.getByTestId("agent-chat-scroll").filter({ visible: true });
+    await feed.getByText(sentence, { exact: true }).click({ clickCount: 3 });
+    await expect(feed).toBeFocused();
+    expect(await page.evaluate(() => window.getSelection()?.toString().trim())).toBe(sentence);
+    await setBrowserActive(page, { active: false, signal: "focus" });
+    await setBrowserActive(page, { active: true, signal: "focus" });
+    await expect(feed).toBeFocused();
+    expect(await page.evaluate(() => window.getSelection()?.toString().trim())).toBe(sentence);
+    await expectComposerNotFocused(page);
   } finally {
     await agent.cleanup();
   }

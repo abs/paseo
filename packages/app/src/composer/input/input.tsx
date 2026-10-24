@@ -498,22 +498,41 @@ function usePasteImagesEffect(args: PasteImagesEffectArgs): void {
   }, [disabled, textarea, isConnected, isDictating, isRealtimeVoiceForCurrentAgent, onAddImages]);
 }
 
+function shouldPreserveBrowserFocus(): boolean {
+  if (hasActiveWebOverlay() || hasOpenDomPopover()) return true;
+  if (window.getSelection()?.isCollapsed === false) return true;
+  const activeElement = document.activeElement;
+  return (
+    activeElement instanceof HTMLElement &&
+    activeElement.getClientRects().length > 0 &&
+    activeElement.matches('input, textarea, [contenteditable="true"]') &&
+    !activeElement.hasAttribute("data-composer-input")
+  );
+}
+
 function useAutoFocusOnWebEffect(
   textInputRef: React.MutableRefObject<ComposerTextInputHandle | null>,
   autoFocus: boolean,
   autoFocusKey: string | undefined,
 ): void {
+  const isAppActivelyVisible = useAppActivelyVisible();
+  const wasAppActivelyVisible = useRef(isAppActivelyVisible);
   useEffect(() => {
-    if (!isWeb || !autoFocus) return;
-    if (hasActiveWebOverlay() || hasOpenDomPopover()) return;
-    const activeElement = document.activeElement;
-    const isEditingElsewhere =
-      activeElement instanceof HTMLElement &&
-      activeElement.matches('input, textarea, [contenteditable="true"]') &&
-      !activeElement.hasAttribute("data-composer-input");
-    if (isEditingElsewhere) return;
-    return focusWithRetries({
-      focus: () => textInputRef.current?.focus(),
+    const isBrowserReturn = isAppActivelyVisible && !wasAppActivelyVisible.current;
+    wasAppActivelyVisible.current = isAppActivelyVisible;
+    if (!isWeb || !autoFocus || !isAppActivelyVisible) return;
+    const cancelFocus: () => void = focusWithRetries({
+      focus: () => {
+        if (isBrowserReturn) {
+          const element = getTextInputNativeElement(textInputRef.current);
+          const cannotEdit = !element || element.matches(":disabled, [readonly]");
+          if (cannotEdit || shouldPreserveBrowserFocus()) {
+            cancelFocus();
+            return;
+          }
+        }
+        textInputRef.current?.focus();
+      },
       isFocused: () => {
         const element = getTextInputNativeElement(textInputRef.current);
         const active = typeof document !== "undefined" ? document.activeElement : null;
@@ -521,8 +540,20 @@ function useAutoFocusOnWebEffect(
       },
       deferInitialAttempt: true,
     });
+    // A click that activates the window can reach its target after the focus event.
+    if (isBrowserReturn) {
+      window.addEventListener("pointerdown", cancelFocus, true);
+      document.addEventListener("focusin", cancelFocus, true);
+    }
+    return () => {
+      cancelFocus();
+      if (isBrowserReturn) {
+        window.removeEventListener("pointerdown", cancelFocus, true);
+        document.removeEventListener("focusin", cancelFocus, true);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoFocus, autoFocusKey]);
+  }, [autoFocus, autoFocusKey, isAppActivelyVisible]);
 }
 
 function MessageInputAutoFocus({
@@ -535,12 +566,7 @@ function MessageInputAutoFocus({
   textInputRef: React.MutableRefObject<ComposerTextInputHandle | null>;
 }) {
   const { isPaneFocused } = useComposerKeyboardScope();
-  const isAppActivelyVisible = useAppActivelyVisible();
-  useAutoFocusOnWebEffect(
-    textInputRef,
-    enabled && isPaneFocused && isAppActivelyVisible,
-    autoFocusKey,
-  );
+  useAutoFocusOnWebEffect(textInputRef, enabled && isPaneFocused, autoFocusKey);
   return null;
 }
 
@@ -2175,7 +2201,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         onLayout={handleComposerLayout}
       >
         <MessageInputAutoFocus
-          enabled={autoFocus && !readOnly && !disabled && !showOverlay}
+          enabled={autoFocus}
           autoFocusKey={autoFocusKey}
           textInputRef={textInputRef}
         />
