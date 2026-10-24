@@ -42,9 +42,6 @@ import {
 } from "@/utils/image-attachments-from-files";
 import type { ComposerAttachment } from "@/attachments/types";
 import type { ImageAttachment, MessagePayload, TextReplacement } from "@/composer/types";
-import { focusWithRetries } from "@/utils/web-focus";
-import { useAppActivelyVisible } from "@/hooks/use-app-visible";
-import { hasActiveWebOverlay, hasOpenDomPopover } from "@/lib/overlay-root";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Shortcut } from "@/components/ui/shortcut";
 import {
@@ -64,6 +61,7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { RenderProfile } from "@/utils/render-profiler";
 import { useComposerHeight } from "./height";
+import { useComposerAutoFocus } from "./auto-focus";
 import { ComposerInputPresentation } from "./presentation";
 import { resolveComposerInputMode, type ComposerInputMode } from "@/composer/input-mode";
 import type { NativePastedFile } from "@/composer/native-pasted-image";
@@ -498,82 +496,6 @@ function usePasteImagesEffect(args: PasteImagesEffectArgs): void {
   }, [disabled, textarea, isConnected, isDictating, isRealtimeVoiceForCurrentAgent, onAddImages]);
 }
 
-function shouldPreserveBrowserFocus(input: HTMLElement): boolean {
-  if (hasActiveWebOverlay() || hasOpenDomPopover()) return true;
-  if (window.getSelection()?.isCollapsed === false) return true;
-  const activeElement = document.activeElement;
-  return (
-    activeElement instanceof HTMLElement &&
-    activeElement.getClientRects().length > 0 &&
-    activeElement.matches('input, textarea, [contenteditable="true"]') &&
-    activeElement !== input
-  );
-}
-
-function watchBrowserFocusIntent(onInteraction: () => void): () => void {
-  const previousFocus = document.activeElement;
-  const onFocusChange = (event: FocusEvent) => {
-    // Chromium also restores focus to the old element during window activation.
-    if (event.target !== previousFocus) onInteraction();
-  };
-  window.addEventListener("pointerdown", onInteraction, true);
-  document.addEventListener("focusin", onFocusChange, true);
-  return () => {
-    window.removeEventListener("pointerdown", onInteraction, true);
-    document.removeEventListener("focusin", onFocusChange, true);
-  };
-}
-
-function useAutoFocusOnWebEffect(
-  textInputRef: React.MutableRefObject<ComposerTextInputHandle | null>,
-  autoFocus: boolean,
-  autoFocusKey: string | undefined,
-): void {
-  const isAppActivelyVisible = useAppActivelyVisible();
-  const wasAppActivelyVisible = useRef(isAppActivelyVisible);
-  const interactedWhileInactive = useRef(false);
-  useEffect(() => {
-    const isBrowserReturn = isAppActivelyVisible && !wasAppActivelyVisible.current;
-    const preserveActivationTarget = isBrowserReturn && interactedWhileInactive.current;
-    wasAppActivelyVisible.current = isAppActivelyVisible;
-    if (isAppActivelyVisible) interactedWhileInactive.current = false;
-    if (!isWeb || !autoFocus) return;
-    if (!isAppActivelyVisible) {
-      // Native activation clicks can finish before the returning passive effect runs.
-      return watchBrowserFocusIntent(() => {
-        interactedWhileInactive.current = true;
-      });
-    }
-    if (preserveActivationTarget) return;
-    const cancelFocus: () => void = focusWithRetries({
-      focus: () => {
-        if (isBrowserReturn) {
-          const element = getTextInputNativeElement(textInputRef.current);
-          const cannotEdit = !element || element.matches(":disabled, [readonly]");
-          if (cannotEdit || shouldPreserveBrowserFocus(element)) {
-            cancelFocus();
-            return;
-          }
-        }
-        textInputRef.current?.focus();
-      },
-      isFocused: () => {
-        const element = getTextInputNativeElement(textInputRef.current);
-        const active = typeof document !== "undefined" ? document.activeElement : null;
-        return Boolean(element) && active === element;
-      },
-      deferInitialAttempt: true,
-    });
-    if (!isBrowserReturn) return cancelFocus;
-    const stopWatching = watchBrowserFocusIntent(cancelFocus);
-    return () => {
-      cancelFocus();
-      stopWatching();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoFocus, autoFocusKey, isAppActivelyVisible]);
-}
-
 function MessageInputAutoFocus({
   enabled,
   autoFocusKey,
@@ -584,7 +506,7 @@ function MessageInputAutoFocus({
   textInputRef: React.MutableRefObject<ComposerTextInputHandle | null>;
 }) {
   const { isPaneFocused } = useComposerKeyboardScope();
-  useAutoFocusOnWebEffect(textInputRef, enabled && isPaneFocused, autoFocusKey);
+  useComposerAutoFocus(textInputRef, enabled && isPaneFocused, autoFocusKey);
   return null;
 }
 

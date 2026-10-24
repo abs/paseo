@@ -20,6 +20,7 @@ import { openAgentRoute, seedMockAgentWorkspace } from "../support/helpers/mock-
 import { createMockIdleAgent, openWorkspaceWithAgents } from "../support/helpers/archive-tab";
 import { seedWorkspace } from "../support/helpers/seed-client";
 import { ensureExplorerSidebar } from "../support/helpers/workspace-tabs";
+import { runWorkspaceActionFromCommandCenter } from "../support/helpers/command-center-workspace-actions";
 import {
   closeMobileAgentSidebar,
   closeMobileExplorer,
@@ -412,6 +413,62 @@ test("an activation click before the focus effect preserves its button target", 
     await expectComposerDraft(page, "Keep this draft");
   } finally {
     await agent.cleanup();
+  }
+});
+
+test("an activation click in an unfocused split pane keeps its feed focused", async ({ page }) => {
+  const workspace = await seedWorkspace({ repoPrefix: "composer-split-activation-" });
+  try {
+    const first = await createMockIdleAgent(workspace.client, {
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      title: "Left activation chat",
+    });
+    const second = await createMockIdleAgent(workspace.client, {
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      title: "Right activation chat",
+    });
+    await openWorkspaceWithAgents(page, [first, second]);
+    await runWorkspaceActionFromCommandCenter(page, "Split pane right");
+    const tab = page.getByTestId(`workspace-tab-agent_${second.id}`).filter({ visible: true });
+    const source = await tab.boundingBox();
+    const target = await page.getByTestId("workspace-new-tab-panel").boundingBox();
+    if (!source || !target) throw new Error("Missing chat tab or new split pane");
+    const startX = source.x + source.width / 2;
+    const startY = source.y + source.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 12, startY + 4);
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, {
+      steps: 20,
+    });
+    await page.mouse.up();
+    const leftPane = page
+      .locator('[data-testid^="workspace-pane-"]')
+      .filter({ has: page.getByTestId(`workspace-tab-agent_${first.id}`) });
+    const rightPane = page
+      .locator('[data-testid^="workspace-pane-"]')
+      .filter({ has: page.getByTestId(`workspace-tab-agent_${second.id}`) });
+    const leftInput = leftPane.getByRole("textbox", { name: "Message agent..." });
+    const rightInput = rightPane.getByRole("textbox", { name: "Message agent..." });
+    const feed = rightPane.getByTestId("agent-chat-scroll");
+    await expect(rightInput).toBeVisible();
+    await leftInput.fill("Keep this left draft");
+    await setBrowserActive(page, { active: false, signal: "focus" });
+    await feed.evaluate((element) => {
+      Object.defineProperty(document, "hasFocus", { configurable: true, value: () => true });
+      window.dispatchEvent(new Event("focus"));
+      element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      if (!(element instanceof HTMLElement)) throw new Error("Chat feed is not an element");
+      element.focus();
+    });
+    await waitForAnimationFrames(page, 4);
+    await expect(feed).toBeFocused();
+    await expect(rightInput).not.toBeFocused();
+    await expect(leftInput).toHaveValue("Keep this left draft");
+  } finally {
+    await workspace.cleanup();
   }
 });
 
