@@ -43,6 +43,8 @@ import {
 import type { ComposerAttachment } from "@/attachments/types";
 import type { ImageAttachment, MessagePayload, TextReplacement } from "@/composer/types";
 import { focusWithRetries } from "@/utils/web-focus";
+import { useAppActivelyVisible } from "@/hooks/use-app-visible";
+import { hasActiveWebOverlay, hasOpenDomPopover } from "@/lib/overlay-root";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Shortcut } from "@/components/ui/shortcut";
 import {
@@ -503,6 +505,13 @@ function useAutoFocusOnWebEffect(
 ): void {
   useEffect(() => {
     if (!isWeb || !autoFocus) return;
+    if (hasActiveWebOverlay() || hasOpenDomPopover()) return;
+    const activeElement = document.activeElement;
+    const isEditingElsewhere =
+      activeElement instanceof HTMLElement &&
+      activeElement.matches('input, textarea, [contenteditable="true"]') &&
+      !activeElement.hasAttribute("data-composer-input");
+    if (isEditingElsewhere) return;
     return focusWithRetries({
       focus: () => textInputRef.current?.focus(),
       isFocused: () => {
@@ -526,7 +535,12 @@ function MessageInputAutoFocus({
   textInputRef: React.MutableRefObject<ComposerTextInputHandle | null>;
 }) {
   const { isPaneFocused } = useComposerKeyboardScope();
-  useAutoFocusOnWebEffect(textInputRef, enabled && isPaneFocused, autoFocusKey);
+  const isAppActivelyVisible = useAppActivelyVisible();
+  useAutoFocusOnWebEffect(
+    textInputRef,
+    enabled && isPaneFocused && isAppActivelyVisible,
+    autoFocusKey,
+  );
   return null;
 }
 
@@ -2161,7 +2175,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         onLayout={handleComposerLayout}
       >
         <MessageInputAutoFocus
-          enabled={autoFocus}
+          enabled={autoFocus && !readOnly && !disabled && !showOverlay}
           autoFocusKey={autoFocusKey}
           textInputRef={textInputRef}
         />

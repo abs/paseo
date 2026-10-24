@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "../support/fixtures";
 import {
   blurComposerInput,
+  switchComposerTabWithKeyboard,
   roundTripComposerTabBeforePaint,
   composerLocator,
   enterComposerFullscreen,
@@ -157,6 +158,139 @@ test("opening an agent focuses the composer when a mouse drives the UI", async (
   }
 });
 
+// Headless Chromium keeps every page focused and visible even after bringToFront.
+// Supply browser lifecycle signals while keeping the app and daemon real.
+async function setBrowserActive(
+  page: Page,
+  input: { active: boolean; signal: "visibility" | "focus" },
+): Promise<void> {
+  await page.evaluate(({ active, signal }) => {
+    if (signal === "visibility") {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => (active ? "visible" : "hidden"),
+      });
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => !active });
+      document.dispatchEvent(new Event("visibilitychange"));
+    } else {
+      Object.defineProperty(document, "hasFocus", { configurable: true, value: () => active });
+      window.dispatchEvent(new Event(active ? "focus" : "blur"));
+    }
+  }, input);
+  await waitForAnimationFrames(page, 4);
+}
+
+for (const signal of ["visibility", "focus"] as const) {
+  test(`returning to the browser restores composer focus after ${signal} changes`, async ({
+    page,
+  }) => {
+    const agent = await seedMockAgentWorkspace({
+      repoPrefix: "composer-browser-return-",
+      title: "Composer browser return",
+    });
+    try {
+      await openAgentRoute(page, agent);
+      await composerLocator(page).fill("Keep this draft");
+      await blurComposerInput(page);
+      await setBrowserActive(page, { active: false, signal });
+      await expectComposerNotFocused(page);
+      await setBrowserActive(page, { active: true, signal });
+      await expectComposerFocused(page);
+      await typeIntoFocusedComposer(page, " after return");
+      await expectComposerDraft(page, "Keep this draft after return");
+    } finally {
+      await agent.cleanup();
+    }
+  });
+}
+
+test("switching chat tabs focuses the selected composer and preserves each draft", async ({
+  page,
+}) => {
+  const workspace = await seedWorkspace({ repoPrefix: "composer-mouse-tabs-" });
+  try {
+    const first = await createMockIdleAgent(workspace.client, {
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      title: "First mouse chat",
+    });
+    const second = await createMockIdleAgent(workspace.client, {
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      title: "Second mouse chat",
+    });
+    await openWorkspaceWithAgents(page, [first, second]);
+    await expectComposerFocused(page);
+    await composerLocator(page).fill("Second draft");
+    await page.getByRole("button", { name: first.title, exact: true }).click();
+    await expectComposerFocused(page);
+    await composerLocator(page).fill("First draft");
+    await switchComposerTabWithKeyboard(page, "next");
+    await expectComposerFocused(page);
+    await expectComposerDraft(page, "Second draft");
+    await blurComposerInput(page);
+    await setBrowserActive(page, { active: false, signal: "focus" });
+    await setBrowserActive(page, { active: true, signal: "focus" });
+    await expectComposerFocused(page);
+    await typeIntoFocusedComposer(page, " after return");
+    await expectComposerDraft(page, "Second draft after return");
+    await switchComposerTabWithKeyboard(page, "previous");
+    await expectComposerFocused(page);
+    await expectComposerDraft(page, "First draft");
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test("returning to the browser preserves a rename dialog's input focus", async ({ page }) => {
+  const agent = await seedMockAgentWorkspace({
+    repoPrefix: "composer-focus-dialog-",
+    title: "Chat with a dialog",
+  });
+  try {
+    await openAgentRoute(page, agent);
+    await page
+      .getByTestId(`workspace-tab-agent_${agent.agentId}`)
+      .filter({ visible: true })
+      .click({ button: "right" });
+    await page.getByTestId(`workspace-tab-context-agent_${agent.agentId}-rename`).click();
+    const input = page.getByTestId(`workspace-tab-rename-modal-agent-${agent.agentId}-input`);
+    await input.fill("Keep editing this title");
+    for (const signal of ["visibility", "focus"] as const) {
+      await setBrowserActive(page, { active: false, signal });
+      await setBrowserActive(page, { active: true, signal });
+      await expect(input).toBeFocused();
+      await expect(input).toHaveValue("Keep editing this title");
+      await expectComposerNotFocused(page);
+    }
+  } finally {
+    await agent.cleanup();
+  }
+});
+
+test("returning to the browser preserves chat Find input focus", async ({ page }) => {
+  const agent = await seedMockAgentWorkspace({
+    repoPrefix: "composer-focus-find-",
+    title: "Chat with Find",
+  });
+  try {
+    await openAgentRoute(page, agent);
+    await expectComposerFocused(page);
+    await page.keyboard.press("ControlOrMeta+f");
+    const input = page.getByRole("textbox", { name: "Find in pane", exact: true });
+    await input.fill("Keep this search");
+    for (const signal of ["visibility", "focus"] as const) {
+      await setBrowserActive(page, { active: false, signal });
+      await setBrowserActive(page, { active: true, signal });
+      await expect(input).toBeFocused();
+      await expect(input).toHaveValue("Keep this search");
+      await expectComposerNotFocused(page);
+    }
+  } finally {
+    await agent.cleanup();
+  }
+});
+
 async function waitForAnimationFrames(page: Page, count: number): Promise<void> {
   await page.evaluate(async (frames) => {
     for (let frame = 0; frame < frames; frame += 1) {
@@ -169,6 +303,26 @@ test.describe("touch screen wide enough for the desktop layout", () => {
   // A tablet or an unfolded foldable gets the desktop layout, but focusing the
   // composer there raises the on-screen keyboard over the conversation.
   test.use({ viewport: { width: 1024, height: 768 }, isMobile: true, hasTouch: true });
+
+  test("returning to the browser leaves a touch composer unfocused", async ({ page }) => {
+    const agent = await seedMockAgentWorkspace({
+      repoPrefix: "composer-touch-browser-return-",
+      title: "Touch browser return",
+    });
+    try {
+      await openAgentRoute(page, agent);
+      await composerLocator(page).fill("Keep this touch draft");
+      await blurComposerInput(page);
+      for (const signal of ["visibility", "focus"] as const) {
+        await setBrowserActive(page, { active: false, signal });
+        await setBrowserActive(page, { active: true, signal });
+        await expectComposerNotFocused(page);
+        await expectComposerDraft(page, "Keep this touch draft");
+      }
+    } finally {
+      await agent.cleanup();
+    }
+  });
 
   test("remounting an inline composer does not restore focus on touch", async ({ page }) => {
     const agent = await seedMockAgentWorkspace({
