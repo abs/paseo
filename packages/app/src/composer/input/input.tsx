@@ -510,6 +510,20 @@ function shouldPreserveBrowserFocus(input: HTMLElement): boolean {
   );
 }
 
+function watchBrowserFocusIntent(onInteraction: () => void): () => void {
+  const previousFocus = document.activeElement;
+  const onFocusChange = (event: FocusEvent) => {
+    // Chromium also restores focus to the old element during window activation.
+    if (event.target !== previousFocus) onInteraction();
+  };
+  window.addEventListener("pointerdown", onInteraction, true);
+  document.addEventListener("focusin", onFocusChange, true);
+  return () => {
+    window.removeEventListener("pointerdown", onInteraction, true);
+    document.removeEventListener("focusin", onFocusChange, true);
+  };
+}
+
 function useAutoFocusOnWebEffect(
   textInputRef: React.MutableRefObject<ComposerTextInputHandle | null>,
   autoFocus: boolean,
@@ -517,11 +531,20 @@ function useAutoFocusOnWebEffect(
 ): void {
   const isAppActivelyVisible = useAppActivelyVisible();
   const wasAppActivelyVisible = useRef(isAppActivelyVisible);
+  const interactedWhileInactive = useRef(false);
   useEffect(() => {
     const isBrowserReturn = isAppActivelyVisible && !wasAppActivelyVisible.current;
+    const preserveActivationTarget = isBrowserReturn && interactedWhileInactive.current;
     wasAppActivelyVisible.current = isAppActivelyVisible;
-    if (!isWeb || !autoFocus || !isAppActivelyVisible) return;
-    const previousFocus = document.activeElement;
+    if (isAppActivelyVisible) interactedWhileInactive.current = false;
+    if (!isWeb || !autoFocus) return;
+    if (!isAppActivelyVisible) {
+      // Native activation clicks can finish before the returning passive effect runs.
+      return watchBrowserFocusIntent(() => {
+        interactedWhileInactive.current = true;
+      });
+    }
+    if (preserveActivationTarget) return;
     const cancelFocus: () => void = focusWithRetries({
       focus: () => {
         if (isBrowserReturn) {
@@ -541,21 +564,11 @@ function useAutoFocusOnWebEffect(
       },
       deferInitialAttempt: true,
     });
-    const cancelOnFocusChange = (event: FocusEvent) => {
-      // Chromium also restores focus to the old element during window activation.
-      if (event.target !== previousFocus) cancelFocus();
-    };
-    // A click that activates the window can reach its target after the focus event.
-    if (isBrowserReturn) {
-      window.addEventListener("pointerdown", cancelFocus, true);
-      document.addEventListener("focusin", cancelOnFocusChange, true);
-    }
+    if (!isBrowserReturn) return cancelFocus;
+    const stopWatching = watchBrowserFocusIntent(cancelFocus);
     return () => {
       cancelFocus();
-      if (isBrowserReturn) {
-        window.removeEventListener("pointerdown", cancelFocus, true);
-        document.removeEventListener("focusin", cancelOnFocusChange, true);
-      }
+      stopWatching();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFocus, autoFocusKey, isAppActivelyVisible]);

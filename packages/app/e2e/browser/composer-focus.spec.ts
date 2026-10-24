@@ -386,6 +386,35 @@ test("browser activation preserves an input focused before its deferred autofocu
   }
 });
 
+test("an activation click before the focus effect preserves its button target", async ({
+  page,
+}) => {
+  const agent = await seedMockAgentWorkspace({
+    repoPrefix: "composer-focus-early-pointer-",
+    title: "Activation click before effects",
+  });
+  try {
+    await openAgentRoute(page, agent);
+    await composerLocator(page).fill("Keep this draft");
+    await setBrowserActive(page, { active: false, signal: "focus" });
+    const button = page.getByTestId("workspace-explorer-toggle").filter({ visible: true }).first();
+    await button.evaluate((element) => {
+      Object.defineProperty(document, "hasFocus", { configurable: true, value: () => true });
+      window.dispatchEvent(new Event("focus"));
+      // A native activation click can finish before React commits its passive effects.
+      element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      if (!(element instanceof HTMLElement)) throw new Error("Explorer toggle is not an element");
+      element.focus();
+    });
+    await waitForAnimationFrames(page, 4);
+    await expect(button).toBeFocused();
+    await expectComposerNotFocused(page);
+    await expectComposerDraft(page, "Keep this draft");
+  } finally {
+    await agent.cleanup();
+  }
+});
+
 test("returning to the browser preserves selected chat text", async ({ page }) => {
   const sentence = "Keep this selected assistant sentence.";
   const agent = await seedMockAgentWorkspace({
