@@ -521,6 +521,7 @@ function useAutoFocusOnWebEffect(
     const isBrowserReturn = isAppActivelyVisible && !wasAppActivelyVisible.current;
     wasAppActivelyVisible.current = isAppActivelyVisible;
     if (!isWeb || !autoFocus || !isAppActivelyVisible) return;
+    const previousFocus = document.activeElement;
     const cancelFocus: () => void = focusWithRetries({
       focus: () => {
         if (isBrowserReturn) {
@@ -540,16 +541,20 @@ function useAutoFocusOnWebEffect(
       },
       deferInitialAttempt: true,
     });
+    const cancelOnFocusChange = (event: FocusEvent) => {
+      // Chromium also restores focus to the old element during window activation.
+      if (event.target !== previousFocus) cancelFocus();
+    };
     // A click that activates the window can reach its target after the focus event.
     if (isBrowserReturn) {
       window.addEventListener("pointerdown", cancelFocus, true);
-      document.addEventListener("focusin", cancelFocus, true);
+      document.addEventListener("focusin", cancelOnFocusChange, true);
     }
     return () => {
       cancelFocus();
       if (isBrowserReturn) {
         window.removeEventListener("pointerdown", cancelFocus, true);
-        document.removeEventListener("focusin", cancelFocus, true);
+        document.removeEventListener("focusin", cancelOnFocusChange, true);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

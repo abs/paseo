@@ -164,7 +164,7 @@ async function setBrowserActive(
   page: Page,
   input: { active: boolean; signal: "visibility" | "focus" },
 ): Promise<void> {
-  await page.evaluate(({ active, signal }) => {
+  await page.evaluate(async ({ active, signal }) => {
     if (signal === "visibility") {
       Object.defineProperty(document, "visibilityState", {
         configurable: true,
@@ -173,8 +173,14 @@ async function setBrowserActive(
       Object.defineProperty(document, "hidden", { configurable: true, get: () => !active });
       document.dispatchEvent(new Event("visibilitychange"));
     } else {
+      const previousFocus = document.activeElement;
       Object.defineProperty(document, "hasFocus", { configurable: true, value: () => active });
       window.dispatchEvent(new Event(active ? "focus" : "blur"));
+      if (active && previousFocus && previousFocus !== document.body) {
+        // Chromium restores element focus after the window focus event and its microtasks.
+        await Promise.resolve();
+        previousFocus.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      }
     }
   }, input);
   await waitForAnimationFrames(page, 4);
@@ -191,7 +197,9 @@ for (const signal of ["visibility", "focus"] as const) {
     try {
       await openAgentRoute(page, agent);
       await composerLocator(page).fill("Keep this draft");
-      await blurComposerInput(page);
+      const feed = page.getByTestId("agent-chat-scroll").filter({ visible: true });
+      await feed.click({ position: { x: 2, y: 40 } });
+      await expect(feed).toBeFocused();
       await setBrowserActive(page, { active: false, signal });
       await expectComposerNotFocused(page);
       await setBrowserActive(page, { active: true, signal });
