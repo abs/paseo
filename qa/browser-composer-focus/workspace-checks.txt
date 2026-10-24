@@ -5,21 +5,21 @@
 
 
 > paseo@0.13.0 format:check:files
-> oxfmt --check packages/app/e2e/browser/composer-focus.spec.ts packages/app/src/composer/input/input.tsx
+> oxfmt --check packages/app/e2e/browser/composer-focus.spec.ts packages/app/src/composer/input/auto-focus.d.ts packages/app/src/composer/input/auto-focus.native.ts packages/app/src/composer/input/auto-focus.web.ts packages/app/src/composer/input/input.tsx
 
 Checking formatting...
 
 All matched files use the correct format.
-Finished in 59ms on 2 files using 8 threads.
+Finished in 85ms on 5 files using 8 threads.
 
 ┃  lint ❯ 
 
 
 > paseo@0.13.0 lint
-> oxlint packages/app/e2e/browser/composer-focus.spec.ts packages/app/src/composer/input/input.tsx
+> oxlint packages/app/e2e/browser/composer-focus.spec.ts packages/app/src/composer/input/auto-focus.d.ts packages/app/src/composer/input/auto-focus.native.ts packages/app/src/composer/input/auto-focus.web.ts packages/app/src/composer/input/input.tsx
 
 Found 0 warnings and 0 errors.
-Finished in 518ms on 2 files with 177 rules using 8 threads.
+Finished in 605ms on 5 files with 177 rules using 8 threads.
 
 ┃  typecheck ❯ 
 
@@ -48,7 +48,7 @@ Finished in 518ms on 2 files with 177 rules using 8 threads.
 > npm --prefix ../../plugin-examples/markdown-panel install --ignore-scripts --no-audit --no-fund && tsgo -p tsconfig.examples.json --noEmit
 
 
-up to date in 253ms
+up to date in 256ms
 
 > @getpaseo/protocol@0.13.0 pretypecheck
 > npm run generate:validators
@@ -93,9 +93,12 @@ generated src/generated/validation/ws-outbound.aot.ts: envelope + 234 session me
 
                                       
   ────────────────────────────────────
-summary: (done in 31.81 seconds)      
-✓ format (0.36 seconds)
-✓ lint (0.76 seconds)
-✓ typecheck (31.78 seconds)
-[fix/focus-chat-on-tab-activation 6974ced80] fix(app): capture interaction intent before browser activation
- 2 files changed, 57 insertions(+), 15 deletions(-)
+summary: (done in 32.19 seconds)      
+✓ format (0.42 seconds)
+✓ lint (0.84 seconds)
+✓ typecheck (32.16 seconds)
+[fix/focus-chat-on-tab-activation 4d9c978c4] fix(app): isolate web focus tracking and observe inactive panes
+ 5 files changed, 147 insertions(+), 80 deletions(-)
+ create mode 100644 packages/app/src/composer/input/auto-focus.d.ts
+ create mode 100644 packages/app/src/composer/input/auto-focus.native.ts
+ create mode 100644 packages/app/src/composer/input/auto-focus.web.ts

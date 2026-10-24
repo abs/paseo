@@ -1,1 +1,10 @@
+I reviewed the `main...HEAD` diff, focusing on 4d9c978c4.
+
 No findings
+
+- **The web/native split matches existing patterns.** `input.tsx` imports `./auto-focus`, which works the same way as the existing `height` hook: there are `.web.ts` and `.native.ts` versions, plus a `.d.ts` file that points type-checking at the native one. The native version doing nothing is the same behaviour as before, because the old hook already returned early when not on web.
+- **The swapped-in focus helpers behave the same.** The web hook now calls `getNativeRef()` and `isFocused()` instead of `getTextInputNativeElement` and its own `activeElement` comparison. In `src/components/ui/text-input/text-input.web.tsx:65,89`, those methods return the same DOM element and do the same check. That component is the only one that sets `textInputRef` in the composer (`input.tsx:1266`), so the result is identical.
+- **The gating change only affects the inactive branch.** Every composer now starts its inactive watcher before the `autoFocus` check, so a pane that isn't focused still records an activation click. Once the window is active, the `!autoFocus || preserveActivationTarget` check skips focusing. If the visibility change and the pane-focus change land in separate renders, the second one takes the normal pane-navigation path, which is the same behaviour as on `main`. Composers whose `autoFocus` is false never focus anything, so the extra watchers only set a flag that resets when the window becomes active.
+- **The new split-pane test matches real timing.** The `useSyncExternalStore` update triggered by window focus and the pane-focus update from `pointerdown` are batched into one render, just as they are in a real browser. The test also checks that the feed stays focused, the right composer stays unfocused, and the left draft is kept.
+
+At the time I looked, `/tmp/paseo-focus-final.log` was still running: 5 of the 20 tests had passed, with none failing. I didn't wait for it to finish.
