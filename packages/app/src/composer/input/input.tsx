@@ -498,7 +498,7 @@ function usePasteImagesEffect(args: PasteImagesEffectArgs): void {
   }, [disabled, textarea, isConnected, isDictating, isRealtimeVoiceForCurrentAgent, onAddImages]);
 }
 
-function shouldPreserveBrowserFocus(): boolean {
+function shouldPreserveBrowserFocus(input: HTMLElement): boolean {
   if (hasActiveWebOverlay() || hasOpenDomPopover()) return true;
   if (window.getSelection()?.isCollapsed === false) return true;
   const activeElement = document.activeElement;
@@ -506,7 +506,7 @@ function shouldPreserveBrowserFocus(): boolean {
     activeElement instanceof HTMLElement &&
     activeElement.getClientRects().length > 0 &&
     activeElement.matches('input, textarea, [contenteditable="true"]') &&
-    !activeElement.hasAttribute("data-composer-input")
+    activeElement !== input
   );
 }
 
@@ -527,7 +527,7 @@ function useAutoFocusOnWebEffect(
         if (isBrowserReturn) {
           const element = getTextInputNativeElement(textInputRef.current);
           const cannotEdit = !element || element.matches(":disabled, [readonly]");
-          if (cannotEdit || shouldPreserveBrowserFocus()) {
+          if (cannotEdit || shouldPreserveBrowserFocus(element)) {
             cancelFocus();
             return;
           }

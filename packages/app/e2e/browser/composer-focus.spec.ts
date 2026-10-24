@@ -19,6 +19,7 @@ import {
 import { openAgentRoute, seedMockAgentWorkspace } from "../support/helpers/mock-agent";
 import { createMockIdleAgent, openWorkspaceWithAgents } from "../support/helpers/archive-tab";
 import { seedWorkspace } from "../support/helpers/seed-client";
+import { ensureExplorerSidebar } from "../support/helpers/workspace-tabs";
 import {
   closeMobileAgentSidebar,
   closeMobileExplorer,
@@ -248,6 +249,56 @@ test("switching chat tabs focuses the selected composer and preserves each draft
     await switchComposerTabWithKeyboard(page, "previous");
     await expectComposerFocused(page);
     await expectComposerDraft(page, "First draft");
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test("browser return keeps the edited chat focused with another chat in Explorer", async ({
+  page,
+}) => {
+  const workspace = await seedWorkspace({ repoPrefix: "composer-explorer-focus-" });
+  try {
+    const first = await createMockIdleAgent(workspace.client, {
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      title: "Main chat",
+    });
+    const second = await createMockIdleAgent(workspace.client, {
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      title: "Explorer chat",
+    });
+    await openWorkspaceWithAgents(page, [first, second]);
+    const explorer = await ensureExplorerSidebar(page);
+    const tab = page.getByTestId(`workspace-tab-agent_${second.id}`).filter({ visible: true });
+    const source = await tab.boundingBox();
+    const target = await explorer.getByTestId("workspace-tabs-row").boundingBox();
+    if (!source || !target) throw new Error("Missing chat or Explorer tab row");
+    const startX = source.x + source.width / 2;
+    const startY = source.y + source.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 12, startY + 4);
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, {
+      steps: 20,
+    });
+    await page.mouse.up();
+    const mainInput = page
+      .locator('[data-testid^="workspace-pane-"]')
+      .getByRole("textbox", { name: "Message agent..." });
+    const explorerInput = explorer.getByRole("textbox", { name: "Message agent..." });
+    await expect(mainInput).toBeVisible();
+    await expect(explorerInput).toBeVisible();
+    for (const input of [mainInput, explorerInput]) {
+      await input.fill("Keep editing this chat");
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await setBrowserActive(page, { active: false, signal: "focus" });
+        await setBrowserActive(page, { active: true, signal: "focus" });
+        await expect(input).toBeFocused();
+        await expect(input).toHaveValue("Keep editing this chat");
+      }
+    }
   } finally {
     await workspace.cleanup();
   }
